@@ -39,25 +39,36 @@ def gen_e_dict():
     """генерируем и заполняем словарь всех энергий"""
     d = dict()
     for i in range(0,1024):
-        conf = gen_e0(i)
+        conf = np.array(gen_e0(i))
         d[str(conf)] = calc_e_dict(conf)
     return d
+
+def coord(i):
+    """get coordinate i of vector"""
+    x = i // L
+    y = i - x*L
+    return (x,y)
+
+def get(i):
+    """fixin' boundary"""
+    if i<0: return i
+    else: return i % L
+    
+def get_neigh():
+    """get neighbour's arr"""
+    s = np.arange(L**2).reshape(L,L)
+    nei = [[]]*L*L
+    for n in range(len(nei)):
+        i,j = coord(n)
+        nei[n] = [s[get(i),get(j)],s[get(i-1),get(j)],s[get(i),get(j+1)],s[get(i+1),get(j)],s[get(i),get(j-1)]]
+    return nei
 
 #################################################################
 
 def gen_state():
     """generate random start state with lenght L*L and q components"""
-    state = np.random.randint(0, q, L*L).reshape(L,L)
+    state = np.random.randint(0, q, L*L)
     return state
-
-def get_ij():
-    """get spin for MC"""
-    return rnd.randint(-1, L-2), rnd.randint(-1, L-2)
-
-def get_conf(i,j,s):
-    """формируем конфигурацию, по вышеописанному правилу таблицы энергий"""
-    return ([s[i,j]]+[s[i-1,j]]+[s[i,j+1]]+
-                     [s[i+1,j]]+[s[i,j-1]])
 
 def mc_choice(dE,T):
     """принимаем или не принимаем переворот спина?"""
@@ -68,37 +79,39 @@ def mc_choice(dE,T):
     else:
         return False
     
-def step(s,edict,T):
+def step(s,edict,nei,T):
     """крутим 1 спин"""
-    i,j = get_ij()          ### выбираем случайный спин
-    arr = get_conf(i,j,s)   ### формируем конфигурацию "вокруг" него
-    arr_before = arr.copy() ### конфигурация ДО переворота спина
-    arr[0] = rnd.choice([_ for _ in range(q)])    ### конфигурация ПОСЛЕ переворота спина
+    i = rnd.randint(0, L*L-1)      ### выбираем случайный спин
+    new_val = rnd.choice([_ for _ in range(q)])
+    
+    arr = s[nei[i]]           ### формируем конфигурацию "вокруг" него
+    arr_before = arr.copy()       ### конфигурация ДО переворота спина
+    arr[0] = new_val    ### конфигурация ПОСЛЕ переворота спина
     dE = edict[str(arr)]-edict[str(arr_before)]
     if mc_choice(dE,T):
-        s[i,j] = arr[0]
+        s[i] = new_val
     return s
 
-def mc_step(s, edict, T):
+def mc_step(s, edict, nei, T):
     """perform L*L flips for 1 MC step"""
     for _ in range(L*L):
-        s = step(s,edict,T)
+        s = step(s,edict,nei,T)
     return s
 
 ################################################################################
 
 def calc_e(state):
-    a = np.concatenate((state[L-1].reshape(1,L), state), axis=0)   # add last line to TOP
-    pstate = np.concatenate((a, a[:,0].reshape(L+1,1)), axis=1)    # add first line to RIGHT
+    s = state.reshape(L,L)
     e = 0
-    for i in range(L):
-        for j in range(L):
-            e += kron(pstate[i,j], pstate[i+1,j]) # right neighbour
-            e += kron(pstate[i,j], pstate[i,j+1]) # down neighbour
+    for i in range(-1,L-1):
+        for j in range(-1,L-1):
+            e += kron(s[i,j], s[i+1,j]) # right neighbour
+            e += kron(s[i,j], s[i,j+1]) # down neighbour
     return -e     # e = -J*qi*qj
 
 def calc_m(state):
-    m_vect = np.array([np.count_nonzero(state == i) for i in range(q)])
+    s = state.reshape(L,L)
+    m_vect = np.array([np.count_nonzero(s == i) for i in range(q)])
     return (max(m_vect)*q/L**2-1)/(q-1)  #Numerical revision of the ... two-dimensional 4-state Potts model (15)
 
 ################################################################################
@@ -108,14 +121,15 @@ def model_p4(T,N_avg=10,N_mc=10,Relax=10):
     E, M = [], []
     edict = gen_e_dict()
     state = gen_state()
+    nei = get_neigh()
     
     #relax $Relax times be4 AVG
     for __ in range(Relax):
-            state = mc_step(state, edict, T)
+            state = mc_step(state, edict, nei, T)
     #AVG every $N_mc steps
     for _ in range(N_avg):
         for __ in range(N_mc):
-            state = mc_step(state, edict, T)
+            state = mc_step(state, edict, nei, T)
         E += [calc_e(state)]
         M += [calc_m(state)]
     
@@ -124,12 +138,12 @@ def model_p4(T,N_avg=10,N_mc=10,Relax=10):
 
 if __name__=="__main__":
     global L, q, J
-    L = 96
+    L = 10
     q = 4      # components
     J = 1      # interaction energy
-    N_avg = 20000
-    N_mc = 50
-    Relax = 10000
+    N_avg = 10
+    N_mc = 1
+    Relax = 10
 
     tc = 1/(np.log(1+4**0.5)) # 0.9102392266268373
     t_ = np.array([0.002, 0.005])
